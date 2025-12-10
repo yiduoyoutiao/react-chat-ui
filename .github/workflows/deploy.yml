@@ -32,5 +32,5 @@ jobs:
             cd /home/ec2-user/react-chat-ui/my-app
             yarn install
             yarn build
-            pm2 restart react-app || pm2 start serve --name "react-app" -- -s build -l 3000
+            pm2 restart react-app || pm2 start serve --name "react-app" -- -s build --single -l 3000
             pm2 save
