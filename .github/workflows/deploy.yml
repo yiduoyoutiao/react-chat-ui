@@ -20,7 +20,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           source: "."
-          target: "/home/ec2-user/react-chat-ui/my-app"
+          target: "/home/ec2-user/react-chat-ui"
 
       - name: Run build and start app on EC2
         uses: appleboy/ssh-action@v1.0.0
