@@ -11,7 +11,7 @@ export default function ChatUI() {
             <Button variant="contained" color="primary">
                 点我咕咕咕！
             </Button>
-            <TextField  sx={{ mt: 2 }} label="说点什么喵啊啊啊～" variant="outlined" />
+            <TextField  sx={{ mt: 2 }} label="说点什么吧咕咕咕～" variant="outlined" />
         </Box>
     );
 }
