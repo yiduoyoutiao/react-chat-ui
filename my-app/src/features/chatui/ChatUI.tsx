@@ -9,7 +9,7 @@ export default function ChatUI() {
                 Hello from ChatUI!
             </Typography>
             <Button variant="contained" color="primary">
-                点我喵！
+                点我喵喵喵！
             </Button>
             <TextField  sx={{ mt: 2 }} label="说点什么喵～" variant="outlined" />
         </Box>
