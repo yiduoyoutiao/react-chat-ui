@@ -14,7 +14,6 @@ export default function ChatUI() {
 
     const handleSend = () => {
         if (inputValue.trim() === "") return;
-
         setMessages((prev) => [...prev, inputValue]);
         setInputValue("");
     };
@@ -30,18 +29,18 @@ export default function ChatUI() {
     return (
         <Box
             sx={{
-                height: "100vh",
+                height: "100dvh", // iOS Safari 适配关键
                 display: "flex",
                 flexDirection: "column",
-                p: 0,
+                backgroundColor: "#ffffff",
             }}
         >
-            {/* 标题 */}
+            {/* 顶部标题 */}
             <Typography variant="h6" sx={{ p: 2, pb: 1 }}>
                 ✧Chat UI✧
             </Typography>
 
-            {/* 聊天记录区域 */}
+            {/* 聊天内容区域 */}
             <Paper
                 ref={listRef}
                 sx={{
@@ -56,7 +55,7 @@ export default function ChatUI() {
                         key={i}
                         sx={{
                             display: "flex",
-                            justifyContent: "flex-end", // 右对齐！
+                            justifyContent: "flex-end",
                             mb: 1.5,
                         }}
                     >
@@ -78,13 +77,19 @@ export default function ChatUI() {
                 ))}
             </Paper>
 
-            {/* 底部输入栏 */}
+            {/* 底部输入框区域 */}
             <Box
                 sx={{
                     p: 2,
+                    pb: "calc(env(safe-area-inset-bottom) + 16px)", // iPhone 底部安全区
                     display: "flex",
                     gap: 2,
                     borderTop: "1px solid #ddd",
+                    backgroundColor: "#ffffff",
+
+                    position: "sticky",
+                    bottom: 0,
+                    zIndex: 10,
                 }}
             >
                 <TextField
