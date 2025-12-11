@@ -214,7 +214,7 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                                     }
                                                 }}
                                             >
-                                                ✧ AI 正在思考中...
+                                                ✧ AI 正在编造敷衍回答...
                                             </Typography>
                                         </Box>
                                     )
