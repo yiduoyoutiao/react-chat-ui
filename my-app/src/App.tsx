@@ -7,7 +7,9 @@ import ChatUI from './features/chatui/ChatUI';
 
 function App() {
   return (
-      <ChatUI />
+      <ChatUI
+          userStackMode = "top"
+      />
   );
 }
 
