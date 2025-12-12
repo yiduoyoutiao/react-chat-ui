@@ -324,12 +324,14 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                                             animation: `fadeInUp 0.4s ease-out backwards`, // 进场动画
                                                             animationDelay: `${optIndex * 0.05}s`, // 费曼技巧：每个气泡延迟一点点出现，像波浪一样！
 
-                                                            "&:hover": {
-                                                                backgroundColor: "#f0f7ff", // 悬停时变成淡淡的宝石蓝背景
-                                                                borderColor: "#80d8ff", // 边框也亮起来
-                                                                color: "#0277bd", // 文字变蓝
-                                                                transform: "translateY(-2px)", // 轻轻上浮，体现“失重感”
-                                                                boxShadow: "0px 4px 8px rgba(2, 119, 189, 0.15)", // 投影加深，像浮起来了
+                                                            "@media (hover: hover)": {
+                                                                "&:hover": {
+                                                                    backgroundColor: "#f0f7ff",
+                                                                    borderColor: "#80d8ff",
+                                                                    color: "#0277bd",
+                                                                    transform: "translateY(-2px)",
+                                                                    boxShadow: "0px 4px 8px rgba(2, 119, 189, 0.15)",
+                                                                },
                                                             },
 
                                                             // 定义一下局部的 keyframes (如果没有全局定义的话，MUI sx 支持内联不大方便，
