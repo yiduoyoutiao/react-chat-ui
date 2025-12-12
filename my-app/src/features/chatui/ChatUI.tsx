@@ -5,21 +5,28 @@ import {
     TextField,
     Paper,
     Typography,
-    Chip,
 } from "@mui/material";
 
 interface ChatUIProps {
     userStackMode?: "bottom" | "top";
 }
 
-// 1. 修改数据结构：增加 options 字段
+// 1. 数据结构：增加 options 字段
 interface ChatTurn {
-    user: string;
+    user: string; // 如果为空字符串，表示是 AI 主动发起的（用户没说话）
     ai: string[] | null;
     options?: string[]; // 存放这一轮的“魔法卡片”选项，如果没有就是 undefined
 }
 
-// 2. 定义一个随机回复池 (模拟 AI 生成的不同长度内容)
+// 2. 触发词列表：当 AI 回复包含这些话时，才会弹出选项
+const TRIGGER_PHRASES = [
+    "话说你喜欢什么游戏呀要不要一起玩~",
+    "别想那么多，要不一起玩点游戏(｡･∀･)ﾉﾞ",
+    "那么可以陪我玩游戏了吗~",
+    "要不要一起来玩点游戏喵！"
+];
+
+// 3. 随机回复池
 const AI_REPLY_POOL = [
     ["你说得对欸"],
     ["确实如此。", "我们可以从另一个角度来看这个问题。"],
@@ -33,23 +40,50 @@ const AI_REPLY_POOL = [
     ["好好好！","那么可以陪我玩游戏了吗~"],
 ];
 
-// 3. 定义固定的测试选项
+// 4. 定义固定的游戏选项
 const FIXED_OPTIONS = [
     "明日方舟",
     "原神",
-    "埃尔登法环",
-    "崩坏:星穹铁道",
-    "光与影:33号远征队",
-    "空洞骑士:丝之歌",
+    "艾尔登法环",
+    "崩坏: 星穹铁道",
+    "光与影: 33号远征队",
+    "空洞骑士: 丝之歌",
     "重返1999",
     "CSGO",
     "英雄联盟",
+    "那个游戏6",
+    "绝区零",
+    "鸣潮",
     "其他游戏",
+];
+
+// 5. 开场白配置 🌟
+const AI_GREETINGS = [
+    "喵~这里是泛用型人工智能原型机TATA~",
+    "你也可以叫我塔塔(｡･∀･)ﾉﾞ",
+    "要不要一起来玩点游戏喵！"
 ];
 
 export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
     const [inputValue, setInputValue] = useState("");
-    const [history, setHistory] = useState<ChatTurn[]>([]);
+
+    // 🔥 初始化状态：植入开场白记忆，并立刻进行一次“触发检查”
+    const [history, setHistory] = useState<ChatTurn[]>(() => {
+        // 1. 拿到开场白内容
+        const initialAiResponse = AI_GREETINGS;
+        // 2. 这里的逻辑和 useEffect 里的一模一样：检查是否命中触发词
+        const isTriggerMatch = initialAiResponse.some(line =>
+            TRIGGER_PHRASES.includes(line)
+        );
+        // 3. 返回初始状态
+        return [{
+            user: "",
+            ai: initialAiResponse,
+            // 4. 如果命中了，直接给选项！
+            options: isTriggerMatch ? FIXED_OPTIONS : undefined
+        }];
+    });
+
     const [isSending, setIsSending] = useState(false);
     const [containerHeight, setContainerHeight] = useState(0);
 
@@ -94,15 +128,14 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
             const randomDelay = Math.floor(Math.random() * 1200) + 800;
 
             const timer = setTimeout(() => {
-                // 1. 先抽取这次要回复的内容
+                // 1. 抽取回复
                 const randomResponse = AI_REPLY_POOL[Math.floor(Math.random() * AI_REPLY_POOL.length)];
 
-                // 2. 🔮 魔法判断：检查这次回复里有没有包含那句“咒语”
-                // 注意：randomResponse 是一个字符串数组，所以我们用 includes 来查找
-                const isTriggerMatch =
-                    randomResponse.includes("话说你喜欢什么游戏呀要不要一起玩~") ||
-                    randomResponse.includes("别想那么多，要不一起玩点游戏(｡･∀･)ﾉﾞ") ||
-                    randomResponse.includes("那么可以陪我玩游戏了吗~");
+                // 2. 🔮 魔法安检：检查回复里是否包含触发词
+                // 使用 some + includes 检查每一行，只要命中一句触发词即可
+                const isTriggerMatch = randomResponse.some(line =>
+                    TRIGGER_PHRASES.includes(line)
+                );
 
                 setHistory(prev => {
                     const newHistory = [...prev];
@@ -153,7 +186,7 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
     return (
         <Box sx={{ height: "100dvh", display: "flex", flexDirection: "column", backgroundColor: "#ffffff", overflow: "hidden" }}>
             <Typography variant="h6" sx={{ p: 2, borderBottom: "1px solid #eee" }}>
-                ✧ Chat UI ✧
+                ✧ TATA Chat ✧
             </Typography>
 
             <Paper
@@ -167,7 +200,7 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                     scrollBehavior: "smooth",
                 }}
             >
-                <Box sx={{ height: 20 }} />
+                {/*<Box sx={{ height: 20 }} />*/}
 
                 {history.map((turn, i) => {
                     const isLast = i === history.length - 1;
@@ -187,31 +220,41 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                 mb: isLast ? 0 : 3,
                                 transition: "min-height 0.3s",
                                 boxSizing: 'border-box',
-                                pt: (userStackMode === "top" && isLast) ? 2 : 0,
-                                pb: (userStackMode === "bottom" && isLast) ? 2 : 0,
+                                pt: 2,
+                                pb: 2,
                             }}
                         >
                             {/* --- 用户消息 --- */}
-                            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-                                <Box
-                                    sx={{
-                                        backgroundColor: "#f0f4f9",
-                                        color: "#1f1f1f",
-                                        px: 2.5,
-                                        py: 1.5,
-                                        borderRadius: "18px",
-                                        maxWidth: "61.8%",
-                                        lineHeight: 1.6,
-                                        wordBreak: "break-word",
-                                        overflowWrap: "anywhere",
-                                    }}
-                                >
-                                    {turn.user}
+                            {/* 有当 user 有内容时才显示，这样开场白看起来就是 AI 独角戏 */}
+                            {turn.user && (
+                                <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                                    <Box
+                                        sx={{
+                                            backgroundColor: "#f0f4f9",
+                                            color: "#1f1f1f",
+                                            px: 2.5,
+                                            py: 1.5,
+                                            borderRadius: "18px",
+                                            maxWidth: "61.8%",
+                                            lineHeight: 1.6,
+                                            wordBreak: "break-word",
+                                            overflowWrap: "anywhere",
+                                        }}
+                                    >
+                                        {turn.user}
+                                    </Box>
                                 </Box>
-                            </Box>
+                            )}
 
                             {/* --- AI 回复区域 --- */}
-                            <Box sx={{ mt: 2, display: "flex", flexDirection: "column", gap: 1 }}>
+                            <Box sx={{
+                                // 如果是 AI 独角戏（user 为空），就不要顶部的间距了
+                                mt: turn.user ? 2 : 0,
+
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 1
+                            }}>
                                 {turn.ai ? (
                                     <>
                                         {turn.ai.map((line, idx) => (
@@ -321,7 +364,7 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                                     }
                                                 }}
                                             >
-                                                ✧ AI 正在编造敷衍回答...
+                                                ✧ TATA 正在思考喵...
                                             </Typography>
                                         </Box>
                                     )
