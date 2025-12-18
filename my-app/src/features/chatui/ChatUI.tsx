@@ -30,23 +30,22 @@ const MOCK_HISTORY_DATA = [
 ];
 
 // --- 新增部分：手写底部弹窗组件 (Bottom Sheet) ---
-// 实现了: 1. 顶部把手拖拽关闭 2. 内部滚动不穿透 3. 仿原生动画
-// --- 升级版：支持半开/全屏切换的手写底部弹窗 ---
-// --- 终极优化版：HistoryBottomSheet ---
-// 包含了性能优化、防止重绘冲突修复以及必要的注释
+// [核心特性]:
+// 1. 高性能: 使用直接 DOM 操作 (绕过 React 渲染循环) 实现 60fps 丝滑手势。
+// 2. 严格限位: 彻底防止底部边缘被拉离屏幕底部 (0像素死锁逻辑)。
+// 3. 原生质感: 实现了动画的无缝接管和流畅的吸附效果。
 
 const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
-    // 状态管理：控制吸附位置
+    // 逻辑状态：控制吸附点 ('half' 半开 vs 'full' 全屏)
     const [snapState, setSnapState] = useState<'half' | 'full'>('half');
     const sheetRef = useRef<HTMLDivElement>(null);
 
-    /**
-     * 【性能优化 / Performance Optimization】
-     * * Reactのレンダリングサイクル(Re-render)を回避し、60fpsの滑らかなジェスチャーを実現するため、
-     * タッチイベント中は `useState` を使わず、直接DOMの `style.transform` を操作しています。
-     * * We use Direct DOM Manipulation during touch gestures to bypass React's render cycle,
-     * ensuring silky smooth performance (60fps) on mobile devices.
-     */
+    // 常量：为了彻底隐藏底部的 box-shadow，在收起状态下额外向下移动 30px
+    const HIDDEN_OFFSET = 30;
+
+    // [性能策略]
+    // 使用 Mutable Ref 而不是 useState 来追踪手势数据。
+    // 这样可以避免在高频 'touchmove' 事件 (~120Hz) 中触发 React 的重新渲染 (Re-render)。
     const dragInfo = useRef({
         startY: 0,
         currentDy: 0,
@@ -54,45 +53,48 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
         startTranslate: 0
     });
 
-    // 预计算高度 (px)，避免在每一帧里做 calc 混合计算消耗性能
+    // 预计算布局参数，节省拖拽时主线程的计算资源
     const metrics = React.useMemo(() => {
         if (typeof window === 'undefined') return { full: 0, halfOffset: 0 };
         const vh = window.innerHeight;
-        // 设定：全屏占 90%，半开占 50%
-        const fullH = vh * 0.9;
-        const halfH = vh * 0.5;
-        // 半开时，顶部距离全屏位置(0)的偏移量
+        const fullH = vh * 0.9; // 最大高度: 90vh
+        const halfH = vh * 0.5; // 初始高度: 50vh
         const halfOffset = fullH - halfH;
         return { full: fullH, halfOffset };
     }, []);
 
-    // 1. 初始化位置 (Anti-Flash)
-    // 使用 useLayoutEffect 确保在浏览器绘制前将面板放到屏幕外
+    // [辅助函数] 获取 DOM 实时位置
+    // 在动画运行中如果用户突然触摸，我们需要获取当前的真实位置，防止画面跳变。
+    const getCurrentTranslateY = () => {
+        if (!sheetRef.current) return 0;
+        const style = window.getComputedStyle(sheetRef.current);
+        const matrix = new WebKitCSSMatrix(style.transform);
+        return matrix.m42;
+    };
+
+    // 1. 初始化 (防止闪烁)
+    // 在浏览器绘制第一帧之前，将面板移出屏幕外。
     useLayoutEffect(() => {
         if (sheetRef.current) {
-            sheetRef.current.style.transform = 'translateY(100%)';
+            sheetRef.current.style.transform = `translateY(calc(100% + ${HIDDEN_OFFSET}px))`;
         }
     }, []);
 
-    // 2. 状态驱动动画 (React Logic -> DOM)
-    // 只有当 open 变化或吸附状态(snapState)变化时，才由 React 接管控制权
+    // 2. 状态同步 (React -> DOM)
+    // 当 React 状态改变时，驱动打开/关闭/吸附的 CSS 动画。
     useEffect(() => {
         if (sheetRef.current) {
-            // 确保动画开启
             sheetRef.current.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)';
-
             if (open) {
-                // 根据状态决定目标位置
                 const targetY = snapState === 'full' ? 0 : metrics.halfOffset;
                 sheetRef.current.style.transform = `translateY(${targetY}px)`;
             } else {
-                // 关闭时移出屏幕
-                sheetRef.current.style.transform = 'translateY(100%)';
+                sheetRef.current.style.transform = `translateY(calc(100% + ${HIDDEN_OFFSET}px))`;
             }
         }
     }, [open, snapState, metrics]);
 
-    // --- 手势处理 (Direct Manipulation) ---
+    // --- 手势处理 (Direct Manipulation / 直接操作) ---
 
     const handleTouchStart = (e: React.TouchEvent) => {
         if (!sheetRef.current) return;
@@ -100,12 +102,13 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
         dragInfo.current.isDragging = true;
         dragInfo.current.startY = e.touches[0].clientY;
 
-        // 【关键】：手指按下瞬间，必须【关掉过渡动画】
-        // 否则会有延迟感（Latency），让拖拽不跟手
-        sheetRef.current.style.transition = 'none';
+        // [关键点]: 读取 DOM 的真实位置。
+        // 即使动画还在进行中，也能实现 1:1 的无缝跟手。
+        const currentY = getCurrentTranslateY();
+        dragInfo.current.startTranslate = currentY;
 
-        // 记录当前的基准位置 (是从 half 还是 full 开始拖的)
-        dragInfo.current.startTranslate = snapState === 'full' ? 0 : metrics.halfOffset;
+        // 关闭过渡动画，防止拖拽时出现“滞后感”
+        sheetRef.current.style.transition = 'none';
     };
 
     const handleTouchMove = (e: React.TouchEvent) => {
@@ -114,21 +117,18 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
         const currentY = e.touches[0].clientY;
         const delta = currentY - dragInfo.current.startY;
 
-        // 阻尼逻辑 (Damping)
-        let effectiveDelta = delta;
-        // 如果在全屏状态下继续往上拉，增加阻力，防止拉过头太难看
-        if (snapState === 'full' && delta < 0) {
-            effectiveDelta = delta * 0.2;
+        let rawTargetY = dragInfo.current.startTranslate + delta;
+
+        // [核心修复]: 严格的 0 地板逻辑 (Zero Floor Logic)
+        // "rawTargetY < 0" 意味着用户试图把弹窗拖得比全屏还高。
+        // 我们强制将其设为 0。这保证了弹窗底部边缘永远不会离开屏幕底部 (防止拔根)。
+        if (rawTargetY < 0) {
+            rawTargetY = 0;
         }
 
-        // 实时计算目标位置 = 基准 + 偏移
-        const targetY = dragInfo.current.startTranslate + effectiveDelta;
-
-        // 记录本次拖拽距离用于松手判断
-        dragInfo.current.currentDy = effectiveDelta;
-
-        // 🔥 高频更新 DOM，不触发 React Render
-        sheetRef.current.style.transform = `translateY(${targetY}px)`;
+        // 直接更新 DOM (速度极快)
+        sheetRef.current.style.transform = `translateY(${rawTargetY}px)`;
+        dragInfo.current.currentDy = delta;
     };
 
     const handleTouchEnd = () => {
@@ -136,38 +136,37 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
         dragInfo.current.isDragging = false;
 
         const dy = dragInfo.current.currentDy;
-        const threshold = 60; // 触发阈值 (px)
+        const threshold = 60; // 触发吸附的阈值 (px)
 
-        // 恢复动画时间，准备回弹或切换状态
+        // 恢复平滑动画，用于吸附回弹
         sheetRef.current.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)';
 
-        // 状态判定逻辑
+        // 吸附逻辑：根据拖拽方向和距离决定去哪个状态
         if (snapState === 'half') {
             if (dy < -threshold) {
-                setSnapState('full'); // 向上拖 -> 变全屏
+                setSnapState('full'); // 向上拖 -> 全屏
             } else if (dy > threshold) {
                 onClose(); // 向下拖 -> 关闭
             } else {
-                // 距离不够，回弹到 Half
+                // 距离不够，回弹到半开
                 sheetRef.current.style.transform = `translateY(${metrics.halfOffset}px)`;
             }
         } else {
-            // full state
+            // 当前是全屏状态
             if (dy > threshold) {
-                setSnapState('half'); // 向下拖 -> 变半开
+                setSnapState('half'); // 向下拖 -> 半开
             } else {
-                // 距离不够，回弹到 Full
+                // 回弹到 0 (严格的全屏位置)
                 sheetRef.current.style.transform = `translateY(0px)`;
             }
         }
 
-        // 重置
         dragInfo.current.currentDy = 0;
     };
 
     return (
         <>
-            {/* 遮罩层 */}
+            {/* 遮罩层 (Backdrop) */}
             <Box
                 onClick={onClose}
                 sx={{
@@ -177,27 +176,21 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
                     transition: 'opacity 0.3s'
                 }}
             />
-            {/* 弹窗本体 */}
+            {/* 弹窗容器 (Sheet Container) */}
             <Box
                 ref={sheetRef}
                 sx={{
                     position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1201,
                     bgcolor: '#fff',
                     borderTopLeftRadius: 20, borderTopRightRadius: 20,
-                    // 使用动态计算的像素高度
                     height: `${metrics.full}px`,
                     boxShadow: '0px -4px 20px rgba(0,0,0,0.1)',
                     display: 'flex', flexDirection: 'column',
-
-                    // 【关键修复 Risk #1】
-                    // 不要在 JSX 里写 `transform: ...`，否则 React Re-render 时会覆盖你的手势
-                    // 初始位置由 useLayoutEffect 控制
-
-                    // 性能优化：提升为合成层
+                    // 优化：告诉浏览器提升该元素为独立的渲染层 (GPU 加速)
                     willChange: 'transform'
                 }}
             >
-                {/* 1. 拖拽把手 (Handle Area) */}
+                {/* 1. 拖拽把手区 (Interaction Zone) */}
                 <Box
                     onTouchStart={handleTouchStart}
                     onTouchMove={handleTouchMove}
@@ -205,7 +198,7 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
                     sx={{
                         width: '100%', height: 48, flexShrink: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'grab', touchAction: 'none' // 阻止浏览器默认滚动行为
+                        cursor: 'grab', touchAction: 'none' // 阻止浏览器的默认滚动行为
                     }}
                 >
                     <Box sx={{ width: 36, height: 5, bgcolor: '#e0e0e0', borderRadius: 3 }} />
@@ -219,15 +212,15 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
                     <Button onClick={onClose} size="small" sx={{ color: '#999' }}>关闭</Button>
                 </Box>
 
-                {/* 3. 内容滚动区 (Content Area) */}
+                {/* 3. 内容滚动区 */}
                 <Box sx={{
                     flex: 1,
                     overflowY: 'auto',
-                    // iOS 滚动惯性支持
-                    WebkitOverflowScrolling: 'touch',
-                    // 防止滚动穿透核心属性
-                    overscrollBehaviorY: 'contain',
-                    pb: 'env(safe-area-inset-bottom)'
+                    WebkitOverflowScrolling: 'touch', // 开启 iOS 原生滚动惯性
+                    overscrollBehaviorY: 'contain',   // 防止滚动链传递给 body
+                    pb: 'env(safe-area-inset-bottom)',
+                    // 视觉保险：底部的额外填充 (虽然 V4 逻辑已经很稳，但加上更安全)
+                    paddingBottom: '100px'
                 }}>
                     <List>
                         {[...MOCK_HISTORY_DATA, ...MOCK_HISTORY_DATA].map((item, index) => (
@@ -250,8 +243,6 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
         </>
     );
 };
-
-
 // --- 原有逻辑代码 ---
 
 interface ChatUIProps {
