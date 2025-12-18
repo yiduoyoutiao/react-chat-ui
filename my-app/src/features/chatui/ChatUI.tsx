@@ -5,7 +5,211 @@ import {
     TextField,
     Paper,
     Typography,
+    List,
+    ListItem,
+    ListItemButton,
+    ListItemText,
+    ListItemIcon
 } from "@mui/material";
+
+// --- 新增部分：Mock 历史数据 ---
+const MOCK_HISTORY_DATA = [
+    "关于 '重返1999' 的配队建议",
+    "艾尔登法环 DLC 入口在哪里？",
+    "帮我写一封给甲方的道歉信",
+    "React useEffect 依赖项死循环问题",
+    "今晚吃什么？",
+    "如何评价明日方舟的新干员",
+    "CSGO 怎么拉枪线",
+    "解释一下量子力学",
+    "日语的敬语怎么用？",
+    "推荐几部好看的科幻电影",
+    "生成一个 python 爬虫脚本",
+    "为什么猫咪会踩奶？",
+    "2024年最值得玩的游戏Top 10"
+];
+
+// --- 新增部分：手写底部弹窗组件 (Bottom Sheet) ---
+// 实现了: 1. 顶部把手拖拽关闭 2. 内部滚动不穿透 3. 仿原生动画
+// --- 升级版：支持半开/全屏切换的手写底部弹窗 ---
+const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
+    // 状态管理
+    // 'half' = 50%高度 (初始状态)
+    // 'full' = 90%高度
+    const [snapState, setSnapState] = useState<'half' | 'full'>('half');
+    const [dragDy, setDragDy] = useState(0); // 手指拖拽的实时偏移量
+    const [isDragging, setIsDragging] = useState(false);
+
+    const startY = useRef(0);
+    const sheetRef = useRef<HTMLDivElement>(null);
+
+    // 每次打开时，重置为“半开”状态
+    useEffect(() => {
+        if (open) {
+            setSnapState('half');
+            setDragDy(0);
+        }
+    }, [open]);
+
+    // --- 计算 CSS 变量 ---
+    // 我们设定最大高度是 90vh，半开高度是 50vh
+    // 那么半开时，需要向下偏移 (90 - 50) = 40vh
+    const FULL_HEIGHT_VH = 90;
+    const HALF_HEIGHT_VH = 50;
+    const HALF_OFFSET_VH = FULL_HEIGHT_VH - HALF_HEIGHT_VH; // 40vh
+
+    // 获取当前的基准偏移量 (vh 转 px 的逻辑交给 CSS calc 处理会更顺滑，但 JS 计算便于手势逻辑)
+    // 这里为了简单，我们用 CSS 里的 calc 来做基准，JS 只负责拖拽的 delta
+
+    // --- 手势逻辑 ---
+    const handleTouchStart = (e: React.TouchEvent) => {
+        setIsDragging(true);
+        startY.current = e.touches[0].clientY;
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if (!isDragging) return;
+        const currentY = e.touches[0].clientY;
+        const delta = currentY - startY.current; // 向下是正数，向上是负数
+
+        // 逻辑限制：
+        // 1. 如果是全屏状态，不允许往上拖太多 (阻尼效果)
+        if (snapState === 'full' && delta < 0) {
+            setDragDy(delta * 0.2); // 阻尼
+            return;
+        }
+
+        // 2. 如果是半开状态，向上拖是负数（去全屏），向下拖是正数（去关闭）
+        setDragDy(delta);
+    };
+
+    const handleTouchEnd = () => {
+        setIsDragging(false);
+        const threshold = 60; // 拖拽阈值 (px)，超过这个距离才触发切换
+
+        if (snapState === 'half') {
+            // --- 在半开状态下 ---
+            if (dragDy < -threshold) {
+                // 向上拖动超过阈值 -> 变全屏
+                setSnapState('full');
+            } else if (dragDy > threshold) {
+                // 向下拖动超过阈值 -> 关闭
+                onClose();
+            }
+            // 否则回弹 (什么都不做，dragDy 会被重置为 0)
+        } else {
+            // --- 在全屏状态下 ---
+            if (dragDy > threshold) {
+                // 向下拖动超过阈值 -> 变半开
+                setSnapState('half');
+            } else {
+                // 向上拖动或者拖动距离不够 -> 回弹保持全屏
+                // (no-op)
+            }
+        }
+
+        setDragDy(0); // 重置拖拽偏移
+    };
+
+    // 计算最终的 translateY
+    // 逻辑：基准偏移 (由状态决定) + 手指拖动偏移
+    //
+    // State 'full': 基准 0vh
+    // State 'half': 基准 40vh
+    // Closed: 基准 100%
+
+    let baseTranslate = '100%';
+    if (open) {
+        baseTranslate = snapState === 'full' ? '0px' : `${HALF_OFFSET_VH}vh`;
+    }
+
+    return (
+        <>
+            {/* 遮罩层 (全屏时颜色深一点，半开时浅一点) */}
+            <Box
+                onClick={onClose}
+                sx={{
+                    position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.5)', zIndex: 1200,
+                    opacity: open ? 1 : 0,
+                    pointerEvents: open ? 'auto' : 'none',
+                    transition: 'opacity 0.3s'
+                }}
+            />
+            {/* 弹窗本体 */}
+            <Box
+                ref={sheetRef}
+                sx={{
+                    position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1201,
+                    bgcolor: '#fff',
+                    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+                    height: `${FULL_HEIGHT_VH}vh`, // 始终渲染 90vh 的高度
+                    boxShadow: '0px -4px 20px rgba(0,0,0,0.1)',
+
+                    // 核心动画逻辑
+                    transform: `translateY(calc(${baseTranslate} + ${isDragging ? dragDy : 0}px))`,
+
+                    // 拖拽时不要过渡动画(跟手)，松开时要有过渡动画(回弹)
+                    transition: isDragging ? 'none' : 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
+
+                    display: 'flex', flexDirection: 'column'
+                }}
+            >
+                {/* 1. 拖拽把手区域 */}
+                <Box
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    sx={{
+                        width: '100%', height: 48, flexShrink: 0, // 加大一点触控区域
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'grab', touchAction: 'none'
+                    }}
+                >
+                    {/* 视觉上的把手条 */}
+                    <Box sx={{ width: 36, height: 5, bgcolor: '#e0e0e0', borderRadius: 3 }} />
+                </Box>
+
+                {/* 2. 标题区 */}
+                <Box sx={{ px: 3, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold">
+                        {snapState === 'half' ? '近期对话' : '全部对话'}
+                    </Typography>
+                    <Button onClick={onClose} size="small" sx={{ color: '#999' }}>关闭</Button>
+                </Box>
+
+                {/* 3. 内容滚动区 */}
+                <Box sx={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    overscrollBehaviorY: 'contain',
+                    WebkitOverflowScrolling: 'touch',
+                    pb: 'env(safe-area-inset-bottom)'
+                }}>
+                    <List>
+                        {/* 增加一些数据，让全屏滚动更有意义 */}
+                        {[...MOCK_HISTORY_DATA, ...MOCK_HISTORY_DATA].map((item, index) => (
+                            <ListItem key={index} disablePadding>
+                                <ListItemButton>
+                                    <ListItemIcon sx={{ minWidth: 36 }}>
+                                        <span style={{ fontSize: 18 }}>🕒</span>
+                                    </ListItemIcon>
+                                    <ListItemText
+                                        primary={item}
+                                        secondary="2025-12-18 14:30"
+                                        primaryTypographyProps={{ fontSize: '0.95rem' }}
+                                    />
+                                </ListItemButton>
+                            </ListItem>
+                        ))}
+                    </List>
+                </Box>
+            </Box>
+        </>
+    );
+};
+
+
+// --- 原有逻辑代码 ---
 
 interface ChatUIProps {
     userStackMode?: "bottom" | "top";
@@ -66,6 +270,8 @@ const AI_GREETINGS = [
 
 export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
     const [inputValue, setInputValue] = useState("");
+    // 新增状态：控制历史弹窗
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
     // 🔥 初始化状态：植入开场白记忆，并立刻进行一次“触发检查”
     const [history, setHistory] = useState<ChatTurn[]>(() => {
@@ -185,9 +391,25 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
 
     return (
         <Box sx={{ height: "100dvh", display: "flex", flexDirection: "column", backgroundColor: "#ffffff", overflow: "hidden" }}>
-            <Typography variant="h6" sx={{ p: 2, borderBottom: "1px solid #eee" }}>
-                ✧ TATA Chat ✧
-            </Typography>
+
+            {/* --- 修改后的 Header：增加了履历按钮 --- */}
+            <Box sx={{
+                p: 2,
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center"
+            }}>
+                <Typography variant="h6">✧ TATA Chat ✧</Typography>
+                <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => setIsHistoryOpen(true)}
+                    sx={{ fontWeight: 'bold', color: '#1976d2' }}
+                >
+                    聊天历史
+                </Button>
+            </Box>
 
             <Paper
                 ref={listRef}
@@ -388,6 +610,13 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                     <Button variant="contained" onClick={() => handleSend(inputValue)} sx={{ borderRadius: "20px" }}>发送</Button>
                 </Box>
             </Box>
+
+            {/* --- 新增：插入手写底部弹窗组件 --- */}
+            <HistoryBottomSheet
+                open={isHistoryOpen}
+                onClose={() => setIsHistoryOpen(false)}
+            />
+
         </Box>
     );
 }
