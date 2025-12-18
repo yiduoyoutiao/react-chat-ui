@@ -32,100 +32,142 @@ const MOCK_HISTORY_DATA = [
 // --- 新增部分：手写底部弹窗组件 (Bottom Sheet) ---
 // 实现了: 1. 顶部把手拖拽关闭 2. 内部滚动不穿透 3. 仿原生动画
 // --- 升级版：支持半开/全屏切换的手写底部弹窗 ---
-const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
-    // 状态管理
-    // 'half' = 50%高度 (初始状态)
-    // 'full' = 90%高度
-    const [snapState, setSnapState] = useState<'half' | 'full'>('half');
-    const [dragDy, setDragDy] = useState(0); // 手指拖拽的实时偏移量
-    const [isDragging, setIsDragging] = useState(false);
+// --- 终极优化版：HistoryBottomSheet ---
+// 包含了性能优化、防止重绘冲突修复以及必要的注释
 
-    const startY = useRef(0);
+const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
+    // 状态管理：控制吸附位置
+    const [snapState, setSnapState] = useState<'half' | 'full'>('half');
     const sheetRef = useRef<HTMLDivElement>(null);
 
-    // 每次打开时，重置为“半开”状态
-    useEffect(() => {
-        if (open) {
-            setSnapState('half');
-            setDragDy(0);
+    /**
+     * 【性能优化 / Performance Optimization】
+     * * Reactのレンダリングサイクル(Re-render)を回避し、60fpsの滑らかなジェスチャーを実現するため、
+     * タッチイベント中は `useState` を使わず、直接DOMの `style.transform` を操作しています。
+     * * We use Direct DOM Manipulation during touch gestures to bypass React's render cycle,
+     * ensuring silky smooth performance (60fps) on mobile devices.
+     */
+    const dragInfo = useRef({
+        startY: 0,
+        currentDy: 0,
+        isDragging: false,
+        startTranslate: 0
+    });
+
+    // 预计算高度 (px)，避免在每一帧里做 calc 混合计算消耗性能
+    const metrics = React.useMemo(() => {
+        if (typeof window === 'undefined') return { full: 0, halfOffset: 0 };
+        const vh = window.innerHeight;
+        // 设定：全屏占 90%，半开占 50%
+        const fullH = vh * 0.9;
+        const halfH = vh * 0.5;
+        // 半开时，顶部距离全屏位置(0)的偏移量
+        const halfOffset = fullH - halfH;
+        return { full: fullH, halfOffset };
+    }, []);
+
+    // 1. 初始化位置 (Anti-Flash)
+    // 使用 useLayoutEffect 确保在浏览器绘制前将面板放到屏幕外
+    useLayoutEffect(() => {
+        if (sheetRef.current) {
+            sheetRef.current.style.transform = 'translateY(100%)';
         }
-    }, [open]);
+    }, []);
 
-    // --- 计算 CSS 变量 ---
-    // 我们设定最大高度是 90vh，半开高度是 50vh
-    // 那么半开时，需要向下偏移 (90 - 50) = 40vh
-    const FULL_HEIGHT_VH = 90;
-    const HALF_HEIGHT_VH = 50;
-    const HALF_OFFSET_VH = FULL_HEIGHT_VH - HALF_HEIGHT_VH; // 40vh
+    // 2. 状态驱动动画 (React Logic -> DOM)
+    // 只有当 open 变化或吸附状态(snapState)变化时，才由 React 接管控制权
+    useEffect(() => {
+        if (sheetRef.current) {
+            // 确保动画开启
+            sheetRef.current.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)';
 
-    // 获取当前的基准偏移量 (vh 转 px 的逻辑交给 CSS calc 处理会更顺滑，但 JS 计算便于手势逻辑)
-    // 这里为了简单，我们用 CSS 里的 calc 来做基准，JS 只负责拖拽的 delta
+            if (open) {
+                // 根据状态决定目标位置
+                const targetY = snapState === 'full' ? 0 : metrics.halfOffset;
+                sheetRef.current.style.transform = `translateY(${targetY}px)`;
+            } else {
+                // 关闭时移出屏幕
+                sheetRef.current.style.transform = 'translateY(100%)';
+            }
+        }
+    }, [open, snapState, metrics]);
 
-    // --- 手势逻辑 ---
+    // --- 手势处理 (Direct Manipulation) ---
+
     const handleTouchStart = (e: React.TouchEvent) => {
-        setIsDragging(true);
-        startY.current = e.touches[0].clientY;
+        if (!sheetRef.current) return;
+
+        dragInfo.current.isDragging = true;
+        dragInfo.current.startY = e.touches[0].clientY;
+
+        // 【关键】：手指按下瞬间，必须【关掉过渡动画】
+        // 否则会有延迟感（Latency），让拖拽不跟手
+        sheetRef.current.style.transition = 'none';
+
+        // 记录当前的基准位置 (是从 half 还是 full 开始拖的)
+        dragInfo.current.startTranslate = snapState === 'full' ? 0 : metrics.halfOffset;
     };
 
     const handleTouchMove = (e: React.TouchEvent) => {
-        if (!isDragging) return;
-        const currentY = e.touches[0].clientY;
-        const delta = currentY - startY.current; // 向下是正数，向上是负数
+        if (!dragInfo.current.isDragging || !sheetRef.current) return;
 
-        // 逻辑限制：
-        // 1. 如果是全屏状态，不允许往上拖太多 (阻尼效果)
+        const currentY = e.touches[0].clientY;
+        const delta = currentY - dragInfo.current.startY;
+
+        // 阻尼逻辑 (Damping)
+        let effectiveDelta = delta;
+        // 如果在全屏状态下继续往上拉，增加阻力，防止拉过头太难看
         if (snapState === 'full' && delta < 0) {
-            setDragDy(delta * 0.2); // 阻尼
-            return;
+            effectiveDelta = delta * 0.2;
         }
 
-        // 2. 如果是半开状态，向上拖是负数（去全屏），向下拖是正数（去关闭）
-        setDragDy(delta);
+        // 实时计算目标位置 = 基准 + 偏移
+        const targetY = dragInfo.current.startTranslate + effectiveDelta;
+
+        // 记录本次拖拽距离用于松手判断
+        dragInfo.current.currentDy = effectiveDelta;
+
+        // 🔥 高频更新 DOM，不触发 React Render
+        sheetRef.current.style.transform = `translateY(${targetY}px)`;
     };
 
     const handleTouchEnd = () => {
-        setIsDragging(false);
-        const threshold = 60; // 拖拽阈值 (px)，超过这个距离才触发切换
+        if (!sheetRef.current) return;
+        dragInfo.current.isDragging = false;
 
+        const dy = dragInfo.current.currentDy;
+        const threshold = 60; // 触发阈值 (px)
+
+        // 恢复动画时间，准备回弹或切换状态
+        sheetRef.current.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)';
+
+        // 状态判定逻辑
         if (snapState === 'half') {
-            // --- 在半开状态下 ---
-            if (dragDy < -threshold) {
-                // 向上拖动超过阈值 -> 变全屏
-                setSnapState('full');
-            } else if (dragDy > threshold) {
-                // 向下拖动超过阈值 -> 关闭
-                onClose();
-            }
-            // 否则回弹 (什么都不做，dragDy 会被重置为 0)
-        } else {
-            // --- 在全屏状态下 ---
-            if (dragDy > threshold) {
-                // 向下拖动超过阈值 -> 变半开
-                setSnapState('half');
+            if (dy < -threshold) {
+                setSnapState('full'); // 向上拖 -> 变全屏
+            } else if (dy > threshold) {
+                onClose(); // 向下拖 -> 关闭
             } else {
-                // 向上拖动或者拖动距离不够 -> 回弹保持全屏
-                // (no-op)
+                // 距离不够，回弹到 Half
+                sheetRef.current.style.transform = `translateY(${metrics.halfOffset}px)`;
+            }
+        } else {
+            // full state
+            if (dy > threshold) {
+                setSnapState('half'); // 向下拖 -> 变半开
+            } else {
+                // 距离不够，回弹到 Full
+                sheetRef.current.style.transform = `translateY(0px)`;
             }
         }
 
-        setDragDy(0); // 重置拖拽偏移
+        // 重置
+        dragInfo.current.currentDy = 0;
     };
-
-    // 计算最终的 translateY
-    // 逻辑：基准偏移 (由状态决定) + 手指拖动偏移
-    //
-    // State 'full': 基准 0vh
-    // State 'half': 基准 40vh
-    // Closed: 基准 100%
-
-    let baseTranslate = '100%';
-    if (open) {
-        baseTranslate = snapState === 'full' ? '0px' : `${HALF_OFFSET_VH}vh`;
-    }
 
     return (
         <>
-            {/* 遮罩层 (全屏时颜色深一点，半开时浅一点) */}
+            {/* 遮罩层 */}
             <Box
                 onClick={onClose}
                 sx={{
@@ -142,51 +184,52 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
                     position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1201,
                     bgcolor: '#fff',
                     borderTopLeftRadius: 20, borderTopRightRadius: 20,
-                    height: `${FULL_HEIGHT_VH}vh`, // 始终渲染 90vh 的高度
+                    // 使用动态计算的像素高度
+                    height: `${metrics.full}px`,
                     boxShadow: '0px -4px 20px rgba(0,0,0,0.1)',
+                    display: 'flex', flexDirection: 'column',
 
-                    // 核心动画逻辑
-                    transform: `translateY(calc(${baseTranslate} + ${isDragging ? dragDy : 0}px))`,
+                    // 【关键修复 Risk #1】
+                    // 不要在 JSX 里写 `transform: ...`，否则 React Re-render 时会覆盖你的手势
+                    // 初始位置由 useLayoutEffect 控制
 
-                    // 拖拽时不要过渡动画(跟手)，松开时要有过渡动画(回弹)
-                    transition: isDragging ? 'none' : 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
-
-                    display: 'flex', flexDirection: 'column'
+                    // 性能优化：提升为合成层
+                    willChange: 'transform'
                 }}
             >
-                {/* 1. 拖拽把手区域 */}
+                {/* 1. 拖拽把手 (Handle Area) */}
                 <Box
                     onTouchStart={handleTouchStart}
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     sx={{
-                        width: '100%', height: 48, flexShrink: 0, // 加大一点触控区域
+                        width: '100%', height: 48, flexShrink: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'grab', touchAction: 'none'
+                        cursor: 'grab', touchAction: 'none' // 阻止浏览器默认滚动行为
                     }}
                 >
-                    {/* 视觉上的把手条 */}
                     <Box sx={{ width: 36, height: 5, bgcolor: '#e0e0e0', borderRadius: 3 }} />
                 </Box>
 
                 {/* 2. 标题区 */}
                 <Box sx={{ px: 3, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Typography variant="h6" fontWeight="bold">
-                        {snapState === 'half' ? '近期对话' : '全部对话'}
+                        {snapState === 'half' ? '近期履历' : '全部履历'}
                     </Typography>
                     <Button onClick={onClose} size="small" sx={{ color: '#999' }}>关闭</Button>
                 </Box>
 
-                {/* 3. 内容滚动区 */}
+                {/* 3. 内容滚动区 (Content Area) */}
                 <Box sx={{
                     flex: 1,
                     overflowY: 'auto',
-                    overscrollBehaviorY: 'contain',
+                    // iOS 滚动惯性支持
                     WebkitOverflowScrolling: 'touch',
+                    // 防止滚动穿透核心属性
+                    overscrollBehaviorY: 'contain',
                     pb: 'env(safe-area-inset-bottom)'
                 }}>
                     <List>
-                        {/* 增加一些数据，让全屏滚动更有意义 */}
                         {[...MOCK_HISTORY_DATA, ...MOCK_HISTORY_DATA].map((item, index) => (
                             <ListItem key={index} disablePadding>
                                 <ListItemButton>
