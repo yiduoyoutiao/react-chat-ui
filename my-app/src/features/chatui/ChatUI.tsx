@@ -471,6 +471,9 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
 
     // 处理选项点击：发送消息 + 销毁选项
     const handleOptionClick = (optionText: string, turnIndex: number) => {
+        // [新增] 如果正在等待回复，禁止点击选项
+        if (isSending) return;
+
         // 1. 先把这个选项作为用户消息发送出去
         handleSend(optionText);
 
@@ -583,17 +586,20 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
     useEffect(() => {
         if (history.length === 0) return;
 
+        const lastTurn = history[history.length - 1];
+
+        // 1. 自动滚动逻辑
         if (userStackMode === "bottom") {
             // 稍微延迟一点滚动，确保 DOM 已经渲染了新的高度
             requestAnimationFrame(() => {
                 listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
             });
-            setIsSending(false);
-            return;
+        } else if (userStackMode === "top" && isSending && latestTurnRef.current) {
+            latestTurnRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
         }
 
-        if (userStackMode === "top" && isSending && latestTurnRef.current) {
-            latestTurnRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+        // [核心修复]：只有当 AI 确实回复了（ai 不为 null），才解除锁定状态
+        if (lastTurn.ai !== null) {
             setIsSending(false);
         }
     }, [history, isSending, userStackMode]);
@@ -670,6 +676,7 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                             lineHeight: 1.6,
                                             wordBreak: "break-word",
                                             overflowWrap: "anywhere",
+                                            whiteSpace: "pre-wrap" // [新增] 允许用户输入换行显示
                                         }}
                                     >
                                         {turn.user}
@@ -824,14 +831,90 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
             </Paper>
 
             <Box sx={{ p: 2, pb: "calc(env(safe-area-inset-bottom) + 16px)", backgroundColor: "#ffffff", position: "sticky", bottom: 0, zIndex: 10, borderTop: "1px solid #eee" }}>
-                <Box sx={{ display: "flex", gap: 1, backgroundColor: "#f0f4f9", p: 1, borderRadius: "28px" }}>
+                {/* [布局重构]:
+                   1. display: "block" (position: relative) 代替 flex，以便绝对定位按钮
+                   2. 移除 gap，通过 padding 控制间距
+                */}
+                <Box sx={{ position: "relative", backgroundColor: "#f0f4f9", p: 1, borderRadius: "28px" }}>
                     <TextField
-                        fullWidth placeholder="说点什么喵~" variant="standard"
-                        InputProps={{ disableUnderline: true, sx: { px: 2 } }}
-                        value={inputValue} onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSend(inputValue)}
+                        fullWidth
+                        placeholder={isSending ? "TATA 正在思考中..." : "说点什么喵~"}
+                        variant="standard"
+                        multiline
+                        maxRows={4}
+                        InputProps={{
+                            disableUnderline: true,
+                            sx: {
+                                px: 2,
+                                // 如果正在发送，将输入框文字变淡
+                                color: isSending ? '#bdbdbd' : 'inherit',
+
+                                // [核心 CSS]: 针对内部的 textarea 进行样式覆盖
+                                "& textarea": {
+                                    // 1. 让右侧文字留出空间，不要被绝对定位的按钮遮挡
+                                    paddingRight: "88px !important",
+
+                                    // 2. 自定义滚动条样式，使其位于最右侧，但底部悬空
+                                    "&::-webkit-scrollbar": {
+                                        width: "4px",
+                                    },
+                                    "&::-webkit-scrollbar-thumb": {
+                                        backgroundColor: "#bdbdbd",
+                                        borderRadius: "2px"
+                                    },
+                                    // [Magical Logic]:
+                                    // 轨道底部增加 margin，高度等于按钮高度 (36px) + 间距。
+                                    // 这样滚动条就会在按钮上方停止，不会穿过按钮。
+                                    "&::-webkit-scrollbar-track": {
+                                        marginBottom: "40px"
+                                    }
+                                }
+                            }
+                        }}
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        // [修改] 移除了 onKeyDown 监听 Enter 发送的逻辑，现在 Enter 默认换行
                     />
-                    <Button variant="contained" onClick={() => handleSend(inputValue)} sx={{ borderRadius: "20px" }}>发送</Button>
+                    <Button
+                        variant="contained"
+                        // [修改] 如果正在发送，禁止点击
+                        onClick={() => {
+                            if (!isSending) handleSend(inputValue);
+                        }}
+                        sx={{
+                            // [布局重构]: 绝对定位，吸附在右下角
+                            position: "absolute",
+                            bottom: "6px", // 贴着容器底部 padding
+                            right: "8px",  // 贴着容器右侧 padding
+                            height: "36px", // [需求1]: 固定高度，不随文字伸缩
+
+                            borderRadius: "20px",
+                            transition: "all 0.3s ease",
+
+                            // [新增] 动态样式：如果正在发送，应用 AI 炫彩流光效果
+                            ...(isSending ? {
+                                background: "linear-gradient(120deg, #2196f3, #9c27b0, #ff4081, #2196f3)",
+                                backgroundSize: "300% 300%",
+                                animation: "ai-flow 3s ease infinite",
+                                boxShadow: "0 0 15px rgba(156, 39, 176, 0.4)",
+                                border: "none",
+                                color: "white",
+                                pointerEvents: "none", // 物理禁用点击
+                                opacity: 0.9,
+                                "@keyframes ai-flow": {
+                                    "0%": { backgroundPosition: "0% 50%" },
+                                    "50%": { backgroundPosition: "100% 50%" },
+                                    "100%": { backgroundPosition: "0% 50%" }
+                                }
+                            } : {
+                                // 正常样式
+                                bgcolor: "#1976d2",
+                                '&:hover': { bgcolor: "#1565c0" }
+                            })
+                        }}
+                    >
+                        {isSending ? "思考中" : "发送"}
+                    </Button>
                 </Box>
             </Box>
 
