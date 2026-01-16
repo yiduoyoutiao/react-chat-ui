@@ -9,8 +9,14 @@ import {
     ListItem,
     ListItemButton,
     ListItemText,
-    ListItemIcon
+    ListItemIcon,
+    // --- 新增引入 手风琴卡片组件 ---
+    Accordion,
+    AccordionSummary,
+    AccordionDetails
 } from "@mui/material";
+// --- 新增图标 展开---
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 // --- 新增部分：Mock 历史数据 ---
 const MOCK_HISTORY_DATA = [
@@ -249,11 +255,18 @@ interface ChatUIProps {
     userStackMode?: "bottom" | "top";
 }
 
-// 1. 数据结构：增加 options 字段
+// --- 新增：手风琴单项的数据结构 ---
+interface AccordionItem {
+    title: string;
+    content: string;
+}
+
+// 1. 数据结构：增加 options 字段 + 新增 accordions 字段
 interface ChatTurn {
     user: string; // 如果为空字符串，表示是 AI 主动发起的（用户没说话）
     ai: string[] | null;
     options?: string[]; // 存放这一轮的“魔法卡片”选项，如果没有就是 undefined
+    accordions?: AccordionItem[]; // <--- 新增字段：手风琴数据数组
 }
 
 // 2. 触发词列表：当 AI 回复包含这些话时，才会弹出选项
@@ -293,6 +306,22 @@ const FIXED_OPTIONS = [
     "绝区零",
     "鸣潮",
     "其他游戏",
+];
+
+// --- 新增：Mock 手风琴数据池 ---
+const FIXED_ACCORDIONS: AccordionItem[] = [
+    {
+        title: "核心机制解析",
+        content: "当受到致命伤害时，不会立即倒下，而是进入【维生状态】，持续10秒。期间攻击力提升30%。"
+    },
+    {
+        title: "推荐配装思路",
+        content: "武器首选【高频太刀】，圣遗物推荐【4件套：绝缘之旗印】。词条优先级：暴击率 > 暴击伤害 > 攻击力。"
+    },
+    {
+        title: "BOSS 逃课打法",
+        content: "不需要正面对决。只需要卡在左边的柱子后面，利用远程技能慢慢磨血即可。注意躲避二阶段的全屏落雷。"
+    }
 ];
 
 // 5. 开场白配置 🌟
@@ -377,14 +406,24 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                     TRIGGER_PHRASES.includes(line)
                 );
 
+                // 3. [新增] 手风琴触发检查
+                // 设定：只要 AI 回复里包含下面这几个词，就显示手风琴
+                const isAccordionMatch = randomResponse.some(line => {
+                    // 定义一个关键词数组，只要命中其中任何一个就触发
+                    const keywords = ["知识盲区", "有趣", "哈哈","另一个角度"];
+                    return keywords.some(key => line.includes(key));
+                });
+
                 setHistory(prev => {
                     const newHistory = [...prev];
                     const index = newHistory.length - 1;
                     newHistory[index] = {
                         ...newHistory[index],
                         ai: randomResponse,
-                        // 3. ⚖️ 条件分发：只有对上了暗号，才给 FIXED_OPTIONS，否则是 undefined
-                        options: isTriggerMatch ? FIXED_OPTIONS : undefined
+                        // 4. ⚖️ 条件分发：只有对上了暗号，才给 FIXED_OPTIONS，否则是 undefined
+                        options: isTriggerMatch ? FIXED_OPTIONS : undefined,
+                        // 5. 注入手风琴数据
+                        accordions: isAccordionMatch ? FIXED_ACCORDIONS : undefined
                     };
                     return newHistory;
                 });
@@ -541,6 +580,71 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                                 </Box>
                                             </Box>
                                         ))}
+
+                                        {/* --- 新增：手风琴卡片渲染区 (知识盲区卡片) --- */}
+                                        {turn.accordions && turn.accordions.length > 0 && (
+                                            <Box sx={{
+                                                mt: 1.5,
+                                                maxWidth: '90%', // 限制宽度，不要太宽
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: 1 // 卡片之间的间距
+                                            }}>
+                                                {turn.accordions.map((acc, accIdx) => (
+                                                    <Accordion
+                                                        key={accIdx}
+                                                        disableGutters // 去掉默认的左右留白
+                                                        elevation={0}  // 去掉默认的高投影，自己写样式
+                                                        sx={{
+                                                            borderRadius: '16px !important', // 强制圆角
+                                                            border: '1px solid #e0e0e0',
+                                                            bgcolor: '#ffffff',
+                                                            '&:before': { display: 'none' }, // 去掉 MUI Accordion 默认的那条分割线
+                                                            overflow: 'hidden',
+                                                            // 进场动画
+                                                            animation: `fadeInUp 0.4s ease-out backwards`,
+                                                            animationDelay: `${accIdx * 0.1}s`, // 依次出现
+                                                            "@keyframes fadeInUp": {
+                                                                "0%": { opacity: 0, transform: "translateY(10px)" },
+                                                                "100%": { opacity: 1, transform: "translateY(0)" }
+                                                            }
+                                                        }}
+                                                    >
+                                                        <AccordionSummary
+                                                            expandIcon={<ExpandMoreIcon sx={{ color: '#1976d2' }} />}
+                                                            sx={{
+                                                                minHeight: 48,
+                                                                '&.Mui-expanded': { minHeight: 48 }, // 防止展开时高度跳动
+                                                                px: 2,
+                                                                // 稍微加一点 hover 反馈
+                                                                '&:hover': { bgcolor: '#fafafa' }
+                                                            }}
+                                                        >
+                                                            <Typography sx={{
+                                                                fontWeight: 600,
+                                                                fontSize: '0.9rem',
+                                                                color: '#424242'
+                                                            }}>
+                                                                {/* 这里的图标只是为了好看，你可以根据业务替换 */}
+                                                                <span style={{ marginRight: 8 }}>📑</span>
+                                                                {acc.title}
+                                                            </Typography>
+                                                        </AccordionSummary>
+                                                        <AccordionDetails sx={{
+                                                            bgcolor: '#f8f9fa', // 展开后的背景稍微灰一点，区分层次
+                                                            px: 2,
+                                                            pb: 2,
+                                                            pt: 1,
+                                                            borderTop: '1px solid #f0f0f0'
+                                                        }}>
+                                                            <Typography variant="body2" sx={{ color: '#616161', lineHeight: 1.6 }}>
+                                                                {acc.content}
+                                                            </Typography>
+                                                        </AccordionDetails>
+                                                    </Accordion>
+                                                ))}
+                                            </Box>
+                                        )}
 
                                         {/* 4. 渲染选项卡片区域 */}
                                         {turn.options && turn.options.length > 0 && (
