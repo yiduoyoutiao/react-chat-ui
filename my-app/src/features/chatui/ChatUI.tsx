@@ -10,15 +10,22 @@ import {
     ListItemButton,
     ListItemText,
     ListItemIcon,
-    // --- 新增引入 手风琴卡片组件 ---
+    // --- 手风琴卡片组件 ---
     Accordion,
     AccordionSummary,
-    AccordionDetails
+    AccordionDetails,
+    // --- 新增：IconButton 用于点赞按钮 ---
+    IconButton
 } from "@mui/material";
-// --- 新增图标 展开---
+// --- 图标 ---
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+// --- 新增：点赞点踩图标 (实心/空心) ---
+import ThumbUpOutlinedIcon from "@mui/icons-material/ThumbUpOutlined";
+import ThumbUpIcon from "@mui/icons-material/ThumbUp";
+import ThumbDownOutlinedIcon from "@mui/icons-material/ThumbDownOutlined";
+import ThumbDownIcon from "@mui/icons-material/ThumbDown";
 
-// --- 新增部分：Mock 历史数据 ---
+// --- Mock 历史数据 ---
 const MOCK_HISTORY_DATA = [
     "关于 '重返1999' 的配队建议",
     "艾尔登法环 DLC 入口在哪里？",
@@ -35,7 +42,7 @@ const MOCK_HISTORY_DATA = [
     "2024年最值得玩的游戏Top 10"
 ];
 
-// --- 新增部分：手写底部弹窗组件 (Bottom Sheet) ---
+// --- 手写底部弹窗组件 (Bottom Sheet) ---
 // [核心特性]:
 // 1. 高性能: 使用直接 DOM 操作 (绕过 React 渲染循环) 实现 60fps 丝滑手势。
 // 2. 严格限位: 彻底防止底部边缘被拉离屏幕底部 (0像素死锁逻辑)。
@@ -249,16 +256,19 @@ const HistoryBottomSheet = ({ open, onClose }: { open: boolean; onClose: () => v
         </>
     );
 };
+
 // --- 原有逻辑代码 ---
 
 interface ChatUIProps {
     userStackMode?: "bottom" | "top";
 }
 
-// --- 新增：手风琴单项的数据结构 ---
+// --- 手风琴单项的数据结构 ---
+// 🚩 1. 状态定义：增加 voteStatus 字段，用于存储点赞/点踩状态
 interface AccordionItem {
     title: string;
     content: string;
+    voteStatus?: 'none' | 'liked' | 'disliked'; // 新增字段
 }
 
 // 1. 数据结构：增加 options 字段 + 新增 accordions 字段
@@ -308,19 +318,22 @@ const FIXED_OPTIONS = [
     "其他游戏",
 ];
 
-// --- 新增：Mock 手风琴数据池 ---
+// --- Mock 手风琴数据池 ---
 const FIXED_ACCORDIONS: AccordionItem[] = [
     {
         title: "核心机制解析",
-        content: "当受到致命伤害时，不会立即倒下，而是进入【维生状态】，持续10秒。期间攻击力提升30%。"
+        content: "当受到致命伤害时，不会立即倒下，而是进入【维生状态】，持续10秒。期间攻击力提升30%。",
+        voteStatus: 'none'
     },
     {
         title: "推荐配装思路",
-        content: "武器首选【高频太刀】，圣遗物推荐【4件套：绝缘之旗印】。词条优先级：暴击率 > 暴击伤害 > 攻击力。"
+        content: "武器首选【高频太刀】，圣遗物推荐【4件套：绝缘之旗印】。词条优先级：暴击率 > 暴击伤害 > 攻击力。",
+        voteStatus: 'none'
     },
     {
         title: "BOSS 逃课打法",
-        content: "不需要正面对决。只需要卡在左边的柱子后面，利用远程技能慢慢磨血即可。注意躲避二阶段的全屏落雷。"
+        content: "不需要正面对决。只需要卡在左边的柱子后面，利用远程技能慢慢磨血即可。注意躲避二阶段的全屏落雷。",
+        voteStatus: 'none'
     }
 ];
 
@@ -330,6 +343,95 @@ const AI_GREETINGS = [
     "你也可以叫我塔塔(｡･∀･)ﾉﾞ",
     "要不要一起来玩点游戏喵！"
 ];
+
+// --- [关键组件]：AccordionCard (受控组件) ---
+// 🚩 2. 组件改造：移除内部 useState，改为完全接收 props 和回调
+// 这样可以确保 UI 状态和 history 数据保持一致
+const AccordionCard = ({
+                           data,
+                           delay,
+                           onVote
+                       }: {
+    data: AccordionItem,
+    delay: string,
+    onVote: (newStatus: 'liked' | 'disliked' | 'none') => void
+}) => {
+
+    // 直接使用数据源中的状态
+    const currentVote = data.voteStatus || 'none';
+
+    return (
+        <Accordion
+            disableGutters
+            elevation={0}
+            sx={{
+                borderRadius: '16px !important',
+                border: '1px solid #e0e0e0',
+                bgcolor: '#ffffff',
+                '&:before': { display: 'none' },
+                overflow: 'hidden',
+                animation: `fadeInUp 0.4s ease-out backwards`,
+                animationDelay: delay,
+                "@keyframes fadeInUp": {
+                    "0%": { opacity: 0, transform: "translateY(10px)" },
+                    "100%": { opacity: 1, transform: "translateY(0)" }
+                }
+            }}
+        >
+            <AccordionSummary
+                expandIcon={<ExpandMoreIcon sx={{ color: '#1976d2' }} />}
+                sx={{
+                    minHeight: 48,
+                    '&.Mui-expanded': { minHeight: 48 },
+                    px: 2,
+                    '&:hover': { bgcolor: '#fafafa' }
+                }}
+            >
+                <Typography sx={{ fontWeight: 600, fontSize: '0.9rem', color: '#424242' }}>
+                    <span style={{ marginRight: 8 }}>📑</span>
+                    {data.title}
+                </Typography>
+            </AccordionSummary>
+
+            <AccordionDetails sx={{ bgcolor: '#f8f9fa', px: 2, pb: 1, pt: 1, borderTop: '1px solid #f0f0f0' }}>
+                <Typography variant="body2" sx={{ color: '#616161', lineHeight: 1.6 }}>
+                    {data.content}
+                </Typography>
+
+                {/* 操作按钮区 */}
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 1.5, pt: 1, borderTop: '1px dashed #e0e0e0' }}>
+                    {/* 点踩按钮 */}
+                    <IconButton
+                        size="small"
+                        onClick={() => onVote(currentVote === 'disliked' ? 'none' : 'disliked')}
+                        sx={{
+                            color: currentVote === 'disliked' ? '#ef5350' : '#9e9e9e',
+                            bgcolor: currentVote === 'disliked' ? '#ffebee' : 'transparent',
+                            '&:hover': { color: '#ef5350', bgcolor: '#ffebee' },
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        {currentVote === 'disliked' ? <ThumbDownIcon fontSize="small" /> : <ThumbDownOutlinedIcon fontSize="small" />}
+                    </IconButton>
+
+                    {/* 点赞按钮 */}
+                    <IconButton
+                        size="small"
+                        onClick={() => onVote(currentVote === 'liked' ? 'none' : 'liked')}
+                        sx={{
+                            color: currentVote === 'liked' ? '#1976d2' : '#9e9e9e',
+                            bgcolor: currentVote === 'liked' ? '#e3f2fd' : 'transparent',
+                            '&:hover': { color: '#1976d2', bgcolor: '#e3f2fd' },
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        {currentVote === 'liked' ? <ThumbUpIcon fontSize="small" /> : <ThumbUpOutlinedIcon fontSize="small" />}
+                    </IconButton>
+                </Box>
+            </AccordionDetails>
+        </Accordion>
+    );
+};
 
 export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
     const [inputValue, setInputValue] = useState("");
@@ -386,6 +488,35 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
         });
     };
 
+    // 🚩 3. 核心逻辑：处理手风琴投票并存入 History
+    const handleAccordionVote = (turnIndex: number, accordionIndex: number, newStatus: 'liked' | 'disliked' | 'none') => {
+
+        // 可选：在这里发送 API 请求
+        console.log(`[数据存入 History] Turn: ${turnIndex}, Card: ${accordionIndex}, NewStatus: ${newStatus}`);
+
+        // 使用不可变数据模式更新 history
+        setHistory(prev => {
+            const newHistory = [...prev];
+            const targetTurn = newHistory[turnIndex];
+
+            if (targetTurn && targetTurn.accordions) {
+                // 深拷贝数组，防止引用污染
+                const newAccordions = [...targetTurn.accordions];
+                // 更新指定卡片的状态
+                newAccordions[accordionIndex] = {
+                    ...newAccordions[accordionIndex],
+                    voteStatus: newStatus
+                };
+
+                newHistory[turnIndex] = {
+                    ...targetTurn,
+                    accordions: newAccordions
+                };
+            }
+            return newHistory;
+        });
+    };
+
     // 监听历史记录，模拟 AI 回复
     useEffect(() => {
         if (history.length === 0) return;
@@ -406,8 +537,7 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                     TRIGGER_PHRASES.includes(line)
                 );
 
-                // 3. [新增] 手风琴触发检查
-                // 设定：只要 AI 回复里包含下面这几个词，就显示手风琴
+                // 3. [新增] 手风琴触发检查 (包含这些词就触发，方便测试)
                 const isAccordionMatch = randomResponse.some(line => {
                     // 定义一个关键词数组，只要命中其中任何一个就触发
                     const keywords = ["知识盲区", "有趣", "哈哈","另一个角度"];
@@ -417,13 +547,19 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                 setHistory(prev => {
                     const newHistory = [...prev];
                     const index = newHistory.length - 1;
+
+                    // 🚩 4. 关键点：生成数据时必须 Deep Copy
+                    // 如果直接引用 FIXED_ACCORDIONS，那么修改一个历史卡片会影响所有卡片
+                    const safeAccordions = isAccordionMatch
+                        ? FIXED_ACCORDIONS.map(item => ({ ...item, voteStatus: 'none' as const }))
+                        : undefined;
+
                     newHistory[index] = {
                         ...newHistory[index],
                         ai: randomResponse,
                         // 4. ⚖️ 条件分发：只有对上了暗号，才给 FIXED_OPTIONS，否则是 undefined
                         options: isTriggerMatch ? FIXED_OPTIONS : undefined,
-                        // 5. 注入手风琴数据
-                        accordions: isAccordionMatch ? FIXED_ACCORDIONS : undefined
+                        accordions: safeAccordions
                     };
                     return newHistory;
                 });
@@ -581,80 +717,36 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                             </Box>
                                         ))}
 
-                                        {/* --- 新增：手风琴卡片渲染区 (知识盲区卡片) --- */}
+                                        {/* --- 新增：手风琴卡片渲染区 --- */}
                                         {turn.accordions && turn.accordions.length > 0 && (
                                             <Box sx={{
                                                 mt: 1.5,
-                                                maxWidth: '90%', // 限制宽度，不要太宽
+                                                maxWidth: '90%',
                                                 display: 'flex',
                                                 flexDirection: 'column',
-                                                gap: 1 // 卡片之间的间距
+                                                gap: 1
                                             }}>
                                                 {turn.accordions.map((acc, accIdx) => (
-                                                    <Accordion
+                                                    <AccordionCard
                                                         key={accIdx}
-                                                        disableGutters // 去掉默认的左右留白
-                                                        elevation={0}  // 去掉默认的高投影，自己写样式
-                                                        sx={{
-                                                            borderRadius: '16px !important', // 强制圆角
-                                                            border: '1px solid #e0e0e0',
-                                                            bgcolor: '#ffffff',
-                                                            '&:before': { display: 'none' }, // 去掉 MUI Accordion 默认的那条分割线
-                                                            overflow: 'hidden',
-                                                            // 进场动画
-                                                            animation: `fadeInUp 0.4s ease-out backwards`,
-                                                            animationDelay: `${accIdx * 0.1}s`, // 依次出现
-                                                            "@keyframes fadeInUp": {
-                                                                "0%": { opacity: 0, transform: "translateY(10px)" },
-                                                                "100%": { opacity: 1, transform: "translateY(0)" }
-                                                            }
-                                                        }}
-                                                    >
-                                                        <AccordionSummary
-                                                            expandIcon={<ExpandMoreIcon sx={{ color: '#1976d2' }} />}
-                                                            sx={{
-                                                                minHeight: 48,
-                                                                '&.Mui-expanded': { minHeight: 48 }, // 防止展开时高度跳动
-                                                                px: 2,
-                                                                // 稍微加一点 hover 反馈
-                                                                '&:hover': { bgcolor: '#fafafa' }
-                                                            }}
-                                                        >
-                                                            <Typography sx={{
-                                                                fontWeight: 600,
-                                                                fontSize: '0.9rem',
-                                                                color: '#424242'
-                                                            }}>
-                                                                {/* 这里的图标只是为了好看，你可以根据业务替换 */}
-                                                                <span style={{ marginRight: 8 }}>📑</span>
-                                                                {acc.title}
-                                                            </Typography>
-                                                        </AccordionSummary>
-                                                        <AccordionDetails sx={{
-                                                            bgcolor: '#f8f9fa', // 展开后的背景稍微灰一点，区分层次
-                                                            px: 2,
-                                                            pb: 2,
-                                                            pt: 1,
-                                                            borderTop: '1px solid #f0f0f0'
-                                                        }}>
-                                                            <Typography variant="body2" sx={{ color: '#616161', lineHeight: 1.6 }}>
-                                                                {acc.content}
-                                                            </Typography>
-                                                        </AccordionDetails>
-                                                    </Accordion>
+                                                        data={acc}
+                                                        delay={`${accIdx * 0.1}s`}
+                                                        // 传递回调：修改 history 的状态
+                                                        onVote={(status) => handleAccordionVote(i, accIdx, status)}
+                                                    />
                                                 ))}
                                             </Box>
                                         )}
 
-                                        {/* 4. 渲染选项卡片区域 */}
+                                        {/* --- 魔法卡片区域 --- */}
                                         {turn.options && turn.options.length > 0 && (
                                             <Box
                                                 sx={{
-                                                    mt: 1.5, // 稍微拉开一点距离，更透气
+                                                    mt: 1.5,
                                                     display: "flex",
                                                     flexWrap: "wrap",
                                                     justifyContent: "flex-end",
-                                                    gap: 1.2, // 增加间距，不那么拥挤
+                                                    gap: 1.2,
                                                     maxWidth: "100%",
                                                     alignSelf: "flex-end",
                                                     pl: 4,
@@ -666,24 +758,18 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                                                         // 去掉 variant="outlined"，改用自定义样式
                                                         onClick={() => handleOptionClick(opt, i)}
                                                         sx={{
-                                                            // --- 核心审美层 ---
-                                                            borderRadius: "24px", // 变得非常圆润
-                                                            border: "1px solid #e0e0e0", // 极淡的边框，似有若无
-                                                            backgroundColor: "#ffffff", // 纯净的背景
-                                                            color: "#424242", // 柔和的深灰，不要全黑
-
-                                                            // --- 排版细节 ---
-                                                            textTransform: "none", // 保持文字原样，不强制大写
+                                                            borderRadius: "24px",
+                                                            border: "1px solid #e0e0e0",
+                                                            backgroundColor: "#ffffff",
+                                                            color: "#424242",
+                                                            textTransform: "none",
                                                             fontSize: "0.875rem",
                                                             fontWeight: 500,
-                                                            padding: "6px 16px", // 稍微大一点的点击区域
-                                                            boxShadow: "0px 1px 2px rgba(0,0,0,0.05)", // 非常轻微的投影，增加层次感
-
-                                                            // --- 魔法动效 ---
-                                                            transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", // 丝滑的过渡
-                                                            animation: `fadeInUp 0.4s ease-out backwards`, // 进场动画
-                                                            animationDelay: `${optIndex * 0.05}s`, // 费曼技巧：每个气泡延迟一点点出现，像波浪一样！
-
+                                                            padding: "6px 16px",
+                                                            boxShadow: "0px 1px 2px rgba(0,0,0,0.05)",
+                                                            transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                                                            animation: `fadeInUp 0.4s ease-out backwards`,
+                                                            animationDelay: `${optIndex * 0.05}s`,
                                                             "@media (hover: hover)": {
                                                                 "&:hover": {
                                                                     backgroundColor: "#f0f7ff",
@@ -749,7 +835,7 @@ export default function ChatUI({ userStackMode = "top" }: ChatUIProps) {
                 </Box>
             </Box>
 
-            {/* --- 新增：插入手写底部弹窗组件 --- */}
+            {/* --- 历史弹窗 --- */}
             <HistoryBottomSheet
                 open={isHistoryOpen}
                 onClose={() => setIsHistoryOpen(false)}
